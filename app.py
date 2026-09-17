@@ -34,8 +34,8 @@ def ensure_vector_db():
     db_dir = "./jeju_db"
     zip_path = "jeju_db.zip"
     
-    # ⚠️ 아래 URL의 'YOUR_GITHUB_ID' 및 'YOUR_REPO_NAME'을 본인의 GitHub 정보로 수정해 주십시오.
-    download_url = "https://github.com/Minckwon13/jeju-ai-advisor/releases/download/v1.0.0/jeju_db.zip"
+    # ⚠️ 본인의 GitHub Release 링크 주소를 확인해 주십시오.
+    download_url = "https://github.com/YOUR_GITHUB_ID/YOUR_REPO_NAME/releases/download/v1.0.0/jeju_db.zip"
 
     if not os.path.exists(db_dir):
         if not os.path.exists(zip_path):
@@ -77,7 +77,7 @@ else:
     )
 
 if st.sidebar.button("🔄 최신 제주 현안 및 도지사 동향 수집"):
-    with st.spinner("제주 지역 현안 뉴스를 수집 중입니다..."):
+    with st.spinner("제주 지역 현안 및 도정 관련 뉴스를 수집 중입니다..."):
         pipeline = JejuNewsPipeline()
         pipeline.run()
     st.sidebar.success("최신 뉴스 수집이 완료되었습니다!")
@@ -174,25 +174,35 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택
+    # [1] 수집 뉴스 선택 (UI 가독성 및 정제 로직 개선)
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
+            
             categories = ["전체"] + list(df['category'].unique()) if 'category' in df.columns else ["전체"]
-            selected_cat = st.selectbox("분야별 카테고리 필터", categories)
+            selected_cat = st.selectbox("📌 분야별 필터", categories)
             
             filtered_df = df if selected_cat == "전체" else df[df['category'] == selected_cat]
+            display_df = filtered_df.head(15)  # 상위 15건으로 제한하여 화면 세로 길이 단축
             
-            if len(filtered_df) > 0:
-                selected_title = st.radio("분석할 뉴스를 선택하세요:", filtered_df['title'].tolist(), index=0)
-                selected_news = filtered_df[filtered_df['title'] == selected_title].iloc[0]
+            if len(display_df) > 0:
+                news_options = display_df['title'].tolist()
+                selected_title = st.selectbox(
+                    "📰 분석할 제주 현안 뉴스를 선택하세요 (최신 15건):", 
+                    news_options
+                )
+                
+                selected_news = display_df[display_df['title'] == selected_title].iloc[0]
                 analysis_target["title"] = selected_news['title']
                 analysis_target["summary"] = selected_news['summary']
-                st.info(f"**선택 기사 요약:**\n{selected_news['summary']}")
+                
+                with st.expander("🔍 선택한 기사 상세 내용 확인", expanded=True):
+                    st.write(f"**제목:** {selected_news['title']}")
+                    st.write(f"**요약:** {selected_news['summary']}")
             else:
-                st.warning(f"'{selected_cat}' 카테고리에 수집된 기사가 없습니다.")
+                st.warning(f"'{selected_cat}' 카테고리에 수집된 제주 관련 기사가 없습니다.")
         else:
-            st.warning("수집된 뉴스 데이터가 없습니다. 사이드바 버튼을 눌러 수집을 진행하세요.")
+            st.warning("수집된 뉴스 데이터가 없습니다. 사이드바의 [최신 제주 현안 수집] 버튼을 눌러주세요.")
 
     # [2] 외부 URL 입력
     with tab2:
@@ -283,7 +293,7 @@ with col2:
 [보고서 작성 가이드라인]
 1. 보고서 상단 헤더:
    - 별도의 수신자/보고대상(예: 수신: 도지사 등)은 절대로 표기하지 말 것.
-   - 작성자/발신자는 '작성자: 정책수석'으로만 명시할 것 (2급 상당 등 직급 표기 금지).
+   - 작성자/발신자는 '작성자: 정책수석'으로만 명시할 것 (직급/등급 표기 금지).
    - 분석·보고 일시: {current_time} 표기.
 2. 본문 작성 항목:
    - 현안 개요: 이슈 핵심 및 도정에 미치는 영향 요약 (2-3줄)
