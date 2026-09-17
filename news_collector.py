@@ -1,53 +1,70 @@
 import feedparser
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import urllib.parse
+import time
 
 class JejuNewsPipeline:
     def __init__(self):
-        # 제주 관련 핵심 키워드 및 제외 키워드 설정
-        self.keywords = ["제주도정", "제주도지사 위성곤", "제주특별자치도", "제주도의회"]
-        self.exclude_words = ["경기도", "충남", "경남", "경북", "전남", "전북", "충북", "강원", "서울시"]
+        # 1. 제주의소리 전수 수집 쿼리 (24시간 이내)
+        self.jejosori_query = "site:jejosori.net when:1d"
+        
+        # 2. 제주 주요 언론사 24시간 이내 주요 현안 쿼리
+        self.major_media_queries = [
+            "site:hallailbo.co.kr when:1d",
+            "site:jemin.com when:1d",
+            "site:headlinejeju.co.kr when:1d",
+            "site:jejudomin.co.kr when:1d",
+            "제주도정 OR 제주도의회 OR 제주사회 when:1d"
+        ]
 
-    def fetch_news(self, keyword):
-        # 타 지자체 기사 제외를 위한 검색 쿼리 구성
-        query = f"{keyword} -경기도 -충남지사 -경남지사"
+    def fetch_rss(self, query, category_label):
         encoded_query = urllib.parse.quote(query)
         rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         feed = feedparser.parse(rss_url)
         
+        now = datetime.now(timezone.utc)
+        time_limit = now - timedelta(hours=24)
+        
         articles = []
-        for entry in feed.entries[:15]:
+        for entry in feed.entries:
             title = entry.title
-            summary = entry.summary if 'summary' in entry else ""
+            summary = entry.get('summary', '')
+            published_parsed = entry.get('published_parsed')
             
-            # 1차 필터링: 제목이나 요약에 '제주' 또는 '위성곤'이 반드시 포함되어야 함
-            if not ("제주" in title or "위성곤" in title or "제주" in summary):
-                continue
-                
-            # 2차 필터링: 타 지자체 관련 단어가 포함된 경우 제외
-            if any(ex in title for ex in self.exclude_words):
-                continue
-
+            # 24시간 이내 발행 여부 재검증
+            if published_parsed:
+                pub_dt = datetime.fromtimestamp(time.mktime(published_parsed), tz=timezone.utc)
+                if pub_dt < time_limit:
+                    continue
+            
             articles.append({
-                "category": keyword,
+                "category": category_label,
                 "title": title,
                 "link": entry.link,
-                "published": entry.published if 'published' in entry else "",
+                "published": entry.get('published', ''),
                 "summary": summary
             })
         return articles
 
     def run(self):
         all_articles = []
-        for kw in self.keywords:
-            all_articles.extend(self.fetch_news(kw))
+        
+        # [단계 1] 제주의소리 24시간 기사 전체 수집
+        jejosori_docs = self.fetch_rss(self.jejosori_query, "제주의소리(전수)")
+        all_articles.extend(jejosori_docs)
+        
+        # [단계 2] 제주 주요 언론사 24시간 기사 수집
+        for q in self.major_media_queries:
+            media_docs = self.fetch_rss(q, "제주지역 주요뉴스")
+            all_articles.extend(media_docs)
             
         df = pd.DataFrame(all_articles)
         if not df.empty:
+            # 중복 기사 제거 및 CSV 저장
             df = df.drop_duplicates(subset=['title'])
             df.to_csv("jeju_daily_news.csv", index=False, encoding="utf-8-sig")
-            print(f"[{datetime.now()}] 정제된 제주 현안 뉴스 {len(df)}건 수집 완료.")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 24시간 이내 제주 현안 뉴스 총 {len(df)}건 수집 완료.")
         return df
 
 if __name__ == "__main__":
