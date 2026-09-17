@@ -73,11 +73,13 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
+# 뉴스 수집 실행 후 즉시 st.rerun() 처리로 UI 화면 즉시 반영
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
-    with st.spinner("제주의소리 최근 24시간 기사전수를 최신화 중입니다..."):
+    with st.spinner("제주의소리 최근 24시간 기사를 최신화 중입니다..."):
         pipeline = JejuNewsPipeline()
         pipeline.run()
     st.sidebar.success("제주의소리 최신 뉴스 수집 완료!")
+    st.rerun()
 
 # RAG Vector DB 및 LLM 로드
 @st.cache_resource
@@ -171,7 +173,7 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 제주의소리 24h 기사", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 제주의소리 실시간 기사 선택 (안전한 CSV 로딩 처리)
+    # [1] 제주의소리 실시간 기사 선택 (안전한 CSV 읽기)
     with tab1:
         csv_file = "jeju_daily_news.csv"
         df = pd.DataFrame(columns=["category", "title", "link", "published", "summary"])
@@ -195,7 +197,7 @@ with col1:
             analysis_target["title"] = selected_news['title']
             analysis_target["summary"] = selected_news['summary']
         else:
-            st.warning("수집된 24시간 이내 기사가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
+            st.warning("수집된 기사가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
 
     # [2] 외부 URL 입력
     with tab2:
