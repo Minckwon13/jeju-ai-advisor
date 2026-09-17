@@ -34,7 +34,6 @@ def ensure_vector_db():
     db_dir = "./jeju_db"
     zip_path = "jeju_db.zip"
     
-    # ⚠️ 본인의 GitHub Release 링크 주소를 확인해 주십시오.
     download_url = "https://github.com/YOUR_GITHUB_ID/YOUR_REPO_NAME/releases/download/v1.0.0/jeju_db.zip"
 
     if not os.path.exists(db_dir):
@@ -174,7 +173,7 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택 (모바일 UI 최적화: 카드형 아코디언 방식)
+    # [1] 수집 뉴스 선택 (모바일 컴팩트 UI: 기사 제목 좌측 선택란 적용)
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
@@ -183,31 +182,21 @@ with col1:
             selected_cat = st.selectbox("📌 분야별 필터", categories)
             
             filtered_df = df if selected_cat == "전체" else df[df['category'] == selected_cat]
-            display_df = filtered_df.head(10)  # 모바일 화면 피로도 방지를 위해 상위 10건 세팅
+            display_df = filtered_df.head(10)  # 상위 10건 목록
             
             if len(display_df) > 0:
-                # 선택된 기사를 기억하기 위한 session_state 세팅
-                if "selected_news" not in st.session_state:
-                    st.session_state["selected_news"] = display_df.iloc[0].to_dict()
+                news_titles = display_df['title'].tolist()
                 
-                st.caption("📱 기사를 터치해 상세 내용을 확인하고 [선택] 버튼을 누르세요.")
+                # 기사 제목 좌측에 선택 원형 버튼(라디오)만 표시
+                selected_title = st.radio(
+                    "📰 분석할 현안 기사를 선택하세요:",
+                    news_titles,
+                    index=0
+                )
                 
-                for idx, row in display_df.iterrows():
-                    is_selected = (st.session_state["selected_news"].get("title") == row['title'])
-                    badge = "✅ [선택됨] " if is_selected else "📰 "
-                    
-                    with st.expander(f"{badge}{row['title']}"):
-                        st.write(f"**요약 내용:**\n{row['summary']}")
-                        if st.button("👉 이 기사 분석 대상으로 선택", key=f"btn_{idx}", use_container_width=True):
-                            st.session_state["selected_news"] = row.to_dict()
-                            st.rerun()
-                
-                # 현재 최종 선택된 기사 확정
-                current_selected = st.session_state["selected_news"]
-                analysis_target["title"] = current_selected["title"]
-                analysis_target["summary"] = current_selected["summary"]
-                
-                st.success(f"🎯 **현재 선택된 분석 대상:**\n{analysis_target['title']}")
+                selected_news = display_df[display_df['title'] == selected_title].iloc[0]
+                analysis_target["title"] = selected_news['title']
+                analysis_target["summary"] = selected_news['summary']
             else:
                 st.warning(f"'{selected_cat}' 카테고리에 수집된 제주 관련 기사가 없습니다.")
         else:
