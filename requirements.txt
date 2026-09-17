@@ -3,8 +3,10 @@ pandas
 requests
 beautifulsoup4
 pypdf
+feedparser
 langchain-huggingface
 langchain-chroma
 langchain-google-genai
 langchain-core
-feedparser
+sentence-transformers
+torch
