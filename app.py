@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------
-# 📦 대용량 Vector DB 자동 다운로드 및 압축 해제 함수 (Toast 알림)
+# 📦 Vector DB 자동 다운로드 및 압축 해제 함수 (Toast 알림)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -73,11 +73,11 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
-if st.sidebar.button("🔄 최신 제주 현안 뉴스 수집"):
-    with st.spinner("제주 주요 현안 및 도정 뉴스를 수집 중입니다..."):
+if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
+    with st.spinner("제주의소리 최근 24시간 기사전수를 최신화 중입니다..."):
         pipeline = JejuNewsPipeline()
         pipeline.run()
-    st.sidebar.success("최신 뉴스 수집 완료!")
+    st.sidebar.success("제주의소리 최신 뉴스 수집 완료!")
 
 # RAG Vector DB 및 LLM 로드
 @st.cache_resource
@@ -99,7 +99,7 @@ def load_policy_advisor(api_key):
     return retriever, llm
 
 # ---------------------------------------------------------------------
-# 🛠️ 텍스트 추출 및 처리 헬퍼 함수
+# 🛠️ 텍스트 추출 헬퍼 함수
 # ---------------------------------------------------------------------
 def extract_text_from_url(url):
     try:
@@ -161,7 +161,6 @@ def parse_multi_agendas(full_text, llm):
 # ---------------------------------------------------------------------
 # 🖥️ 메인 UI 레이아웃
 # ---------------------------------------------------------------------
-# 타이틀 및 캡션 수정 반영 완료
 st.title("🌋 제주도정 현안 대응 시스템")
 st.caption("제주특별자치도 수석 전용 의사결정 지원 플랫폼")
 
@@ -170,35 +169,29 @@ analysis_target = {"title": "", "summary": ""}
 
 with col1:
     st.subheader("📥 분석 대상 데이터 입력")
-    tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
+    tab1, tab2, tab3 = st.tabs(["📰 제주의소리 24h 기사", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택 (모바일 컴팩트 UI 적용 유지)
+    # [1] 제주의소리 실시간 기사 선택 (24시간 내 수집분)
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
             
-            categories = ["전체"] + list(df['category'].unique()) if 'category' in df.columns else ["전체"]
-            selected_cat = st.selectbox("📌 분야별 필터", categories)
-            
-            filtered_df = df if selected_cat == "전체" else df[df['category'] == selected_cat]
-            display_df = filtered_df.head(10)
-            
-            if len(display_df) > 0:
-                news_titles = display_df['title'].tolist()
+            if len(df) > 0:
+                news_titles = df['title'].tolist()
                 
                 selected_title = st.radio(
-                    "📰 분석할 현안 기사를 선택하세요:",
+                    "📰 분석할 현안 기사를 선택하세요 (최근 24시간 내):",
                     news_titles,
                     index=0
                 )
                 
-                selected_news = display_df[display_df['title'] == selected_title].iloc[0]
+                selected_news = df[df['title'] == selected_title].iloc[0]
                 analysis_target["title"] = selected_news['title']
                 analysis_target["summary"] = selected_news['summary']
             else:
-                st.warning(f"'{selected_cat}' 카테고리에 수집된 제주 관련 기사가 없습니다.")
+                st.warning("최근 24시간 이내에 등록된 제주의소리 기사가 없습니다. 사이드바의 버튼을 눌러 수집하세요.")
         else:
-            st.warning("수집된 뉴스 데이터가 없습니다. 사이드바의 [최신 제주 현안 수집] 버튼을 눌러주세요.")
+            st.warning("수집된 뉴스 데이터가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
 
     # [2] 외부 URL 입력
     with tab2:
@@ -258,7 +251,6 @@ with col1:
 # 📋 3축 분석 및 보고서 출력
 # ---------------------------------------------------------------------
 with col2:
-    # 소제목에서 '리포트' 단어 삭제 반영 완료
     st.subheader("📋 3축(정책·법률·정무) 분석")
     
     if st.button("🚀 현안 3축 분석 생성", type="primary", use_container_width=True):
