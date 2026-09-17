@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------
-# 📦 Vector DB 자동 다운로드 및 압축 해제 (화면 차지 없는 미니 토스트 알림)
+# 📦 Vector DB 자동 다운로드 및 압축 해제 (화면 표시 박스 완전히 제거)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -37,20 +37,17 @@ def ensure_vector_db():
 
     if not os.path.exists(db_dir):
         if not os.path.exists(zip_path):
-            st.toast("📦 DB 다운로드 중...", icon="⏳")
             try:
                 urllib.request.urlretrieve(download_url, zip_path)
             except Exception as e:
-                st.toast(f"❌ 다운로드 실패: {e}", icon="⚠️")
+                print(f"DB 다운로드 예외: {e}")
                 return
 
-        st.toast("📦 DB 압축 해제 중...", icon="⏳")
         try:
             with zipfile.ZipFile(zip_path, "r") as zip_ref:
                 zip_ref.extractall(".")
-            st.toast("✅ Vector DB 구축 완료!", icon="🎉")
         except Exception as e:
-            st.toast(f"❌ 압축 해제 실패: {e}", icon="⚠️")
+            print(f"DB 압축해제 예외: {e}")
 
 # ---------------------------------------------------------------------
 # ⚙️ 사이드바 및 보안 API Key 설정
@@ -80,7 +77,7 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
-# RAG Vector DB 및 LLM 로드
+# RAG Vector DB 및 LLM 로드 (gemini-2.5-flash 표준 모델 적용)
 @st.cache_resource
 def load_policy_advisor(api_key):
     ensure_vector_db()
@@ -92,8 +89,9 @@ def load_policy_advisor(api_key):
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     
+    # 쿼터 제약이 적은 표준 고성능 모델 gemini-2.5-flash로 전환
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.6-flash", 
+        model="gemini-2.5-flash", 
         google_api_key=api_key,
         temperature=0.2
     )
