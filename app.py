@@ -21,36 +21,37 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from news_collector import JejuNewsPipeline
 
-# 1. 페이지 제목 수정
 st.set_page_config(
-    page_title="제주도정 현안대응 시스템",
+    page_title="제주특별자치도정 현안 대응 AI 지원 시스템",
     page_icon="🌋",
     layout="wide"
 )
 
 # ---------------------------------------------------------------------
-# 📦 대용량 Vector DB 자동 다운로드 (알림 박스 제거 및 조용히 처리)
+# 📦 대용량 Vector DB 자동 다운로드 및 압축 해제 함수 (UI 대폭 축소)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
     zip_path = "jeju_db.zip"
-    
     download_url = "https://github.com/YOUR_GITHUB_ID/YOUR_REPO_NAME/releases/download/v1.0.0/jeju_db.zip"
 
     if not os.path.exists(db_dir):
-        with st.spinner("시스템 데이터베이스를 준비 중입니다..."):
-            if not os.path.exists(zip_path):
-                try:
-                    urllib.request.urlretrieve(download_url, zip_path)
-                except Exception as e:
-                    st.error(f"❌ DB 다운로드 실패: {e}")
-                    return
-
+        if not os.path.exists(zip_path):
+            # 화면 공간을 차지하지 않는 우측 하단 팝업(Toast) 알림 사용
+            st.toast("📦 DB 다운로드 중...", icon="⏳")
             try:
-                with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(".")
+                urllib.request.urlretrieve(download_url, zip_path)
             except Exception as e:
-                st.error(f"❌ DB 압축 해제 실패: {e}")
+                st.toast(f"❌ 다운로드 실패: {e}", icon="⚠️")
+                return
+
+        st.toast("📦 DB 압축 해제 중...", icon="⏳")
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(".")
+            st.toast("✅ Vector DB 구축 완료!", icon="🎉")
+        except Exception as e:
+            st.toast(f"❌ 압축 해제 실패: {e}", icon="⚠️")
 
 # ---------------------------------------------------------------------
 # ⚙️ 사이드바 및 보안 API Key 설정
@@ -73,16 +74,16 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
-if st.sidebar.button("🔄 최신 제주 현안 및 도지사 동향 수집"):
-    with st.spinner("제주 지역 현안 및 도정 관련 뉴스를 수집 중입니다..."):
+if st.sidebar.button("🔄 최신 제주 현안 뉴스 수집"):
+    with st.spinner("제주 주요 현안 및 도정 뉴스를 수집 중입니다..."):
         pipeline = JejuNewsPipeline()
         pipeline.run()
-    st.sidebar.success("최신 뉴스 수집이 완료되었습니다!")
+    st.sidebar.success("최신 뉴스 수집 완료!")
 
 # RAG Vector DB 및 LLM 로드
 @st.cache_resource
 def load_policy_advisor(api_key):
-    ensure_vector_db()
+    ensure_vector_db() # 여기서 실행되며 Toast 알림으로 처리됨
     
     embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
     vectorstore = Chroma(
@@ -161,9 +162,8 @@ def parse_multi_agendas(full_text, llm):
 # ---------------------------------------------------------------------
 # 🖥️ 메인 UI 레이아웃
 # ---------------------------------------------------------------------
-# 1, 2. 타이틀 및 자막 수정
-st.title("🌋 제주도정 현안대응 시스템")
-st.caption("제주특별자치도 수석 전용 의사결정 지원 플랫폼")
+st.title("🌋 민선 9기 제주도정 현안 대응 3축 분석 시스템")
+st.caption("제주특별자치도 정책수석 전용 의사결정 지원 플랫폼")
 
 col1, col2 = st.columns([1, 1.2])
 analysis_target = {"title": "", "summary": ""}
@@ -172,7 +172,7 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택 (깔끔한 라디오 버튼 방식)
+    # [1] 수집 뉴스 선택 (모바일 컴팩트 UI 적용 유지)
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
@@ -185,6 +185,7 @@ with col1:
             
             if len(display_df) > 0:
                 news_titles = display_df['title'].tolist()
+                
                 selected_title = st.radio(
                     "📰 분석할 현안 기사를 선택하세요:",
                     news_titles,
@@ -310,15 +311,11 @@ with col2:
                     })
                     
                     st.markdown(report)
-                    
-                    # 4. 한글 깨짐 방지 처리 (UTF-8-SIG BOM 인코딩 적용)
-                    utf8_bom_report = ("\ufeff" + report).encode("utf-8-sig")
-                    
                     st.download_button(
                         label="📥 보고서 텍스트 다운로드",
-                        data=utf8_bom_report,
+                        data=report,
                         file_name=f"정책수석보고_{analysis_target['title'][:10]}.txt",
-                        mime="text/plain; charset=utf-8-sig",
+                        mime="text/plain",
                         use_container_width=True
                     )
                 except Exception as e:
