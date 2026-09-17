@@ -1,68 +1,53 @@
 import feedparser
 import pandas as pd
-import urllib.parse
-import re
 from datetime import datetime
+import urllib.parse
 
 class JejuNewsPipeline:
     def __init__(self):
-        # 민선 9기 도정 및 도지사 전용 태그 강화 카테고리 매핑
-        self.category_keywords = {
-            "도지사/핵심도정": ["위성곤", "제주도지사", "제주특별자치도지사", "도지사 공약", "제주도정"],
-            "정무/의회": ["제주도의회", "제주 정치", "도정질문", "제주 정당"],
-            "특별법/특례": ["제주특별법", "행정체제개편", "상급종합병원", "제주 특례"],
-            "민생/경제": ["제주 물가", "제주 관광", "제주 농축산", "제주 수산", "제주 민생"],
-            "환경/도시": ["제주 쓰레기", "제주 지하수", "제주 풍력", "제주 도시계획", "제주 환경"],
-            "4·3/복지": ["제주 4·3", "제주 복지", "제주 돌봄"]
-        }
+        # 제주 관련 핵심 키워드 및 제외 키워드 설정
+        self.keywords = ["제주도정", "제주도지사 위성곤", "제주특별자치도", "제주도의회"]
+        self.exclude_words = ["경기도", "충남", "경남", "경북", "전남", "전북", "충북", "강원", "서울시"]
 
-    def clean_text(self, text):
-        """HTML 태그 및 불필요한 특수문자 정제"""
-        text = re.sub(r'<[^>]+>', '', text)
-        text = re.sub(r'&[^;]+;', '', text)
-        return text.strip()
-
-    def fetch_rss_news(self, keyword, category):
-        encoded = urllib.parse.quote(keyword)
-        rss_url = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
+    def fetch_news(self, keyword):
+        # 타 지자체 기사 제외를 위한 검색 쿼리 구성
+        query = f"{keyword} -경기도 -충남지사 -경남지사"
+        encoded_query = urllib.parse.quote(query)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         feed = feedparser.parse(rss_url)
         
         articles = []
-        for entry in feed.entries[:10]: # 키워드당 상위 10개 수집
-            title = self.clean_text(entry.title)
-            summary = self.clean_text(entry.summary if 'summary' in entry else "")
+        for entry in feed.entries[:15]:
+            title = entry.title
+            summary = entry.summary if 'summary' in entry else ""
             
+            # 1차 필터링: 제목이나 요약에 '제주' 또는 '위성곤'이 반드시 포함되어야 함
+            if not ("제주" in title or "위성곤" in title or "제주" in summary):
+                continue
+                
+            # 2차 필터링: 타 지자체 관련 단어가 포함된 경우 제외
+            if any(ex in title for ex in self.exclude_words):
+                continue
+
             articles.append({
-                "category": category,
-                "keyword": keyword,
+                "category": keyword,
                 "title": title,
                 "link": entry.link,
-                "published": getattr(entry, 'published', datetime.now().strftime("%Y-%m-%d %H:%M")),
-                "summary": summary[:250] + "..." if len(summary) > 250 else summary,
-                "collected_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                "published": entry.published if 'published' in entry else "",
+                "summary": summary
             })
         return articles
 
     def run(self):
         all_articles = []
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 실시간 제주 현안 및 도지사 동향 뉴스 수집 시작...")
-        
-        for cat, keywords in self.category_keywords.items():
-            for kw in keywords:
-                articles = self.fetch_rss_news(kw, cat)
-                all_articles.extend(articles)
-        
+        for kw in self.keywords:
+            all_articles.extend(self.fetch_news(kw))
+            
         df = pd.DataFrame(all_articles)
         if not df.empty:
-            # 기사 제목 기준 중복 제거 및 인덱스 재정렬
-            df = df.drop_duplicates(subset=['title']).reset_index(drop=True)
+            df = df.drop_duplicates(subset=['title'])
             df.to_csv("jeju_daily_news.csv", index=False, encoding="utf-8-sig")
-            
-            gov_news_cnt = len(df[df['category'] == "도지사/핵심도정"])
-            print(f"✅ 수집 완료: 총 {len(df)}건 수집 (도지사/핵심도정 관련 기사: {gov_news_cnt}건)")
-            print("💾 'jeju_daily_news.csv' 파일에 저장되었습니다.")
-        else:
-            print("⚠️ 수집된 뉴스가 없습니다.")
+            print(f"[{datetime.now()}] 정제된 제주 현안 뉴스 {len(df)}건 수집 완료.")
         return df
 
 if __name__ == "__main__":
