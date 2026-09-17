@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------
-# 📦 Vector DB 자동 다운로드 및 압축 해제 (화면 표시 박스 완전히 제거)
+# 📦 Vector DB 자동 다운로드 및 압축 해제 (화면 표시 박스 제거)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -77,7 +77,7 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
-# RAG Vector DB 및 LLM 로드 (gemini-2.5-flash 표준 모델 적용)
+# RAG Vector DB 및 LLM 로드 (정식 표준 모델 gemini-1.5-flash 적용)
 @st.cache_resource
 def load_policy_advisor(api_key):
     ensure_vector_db()
@@ -89,9 +89,9 @@ def load_policy_advisor(api_key):
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     
-    # 쿼터 제약이 적은 표준 고성능 모델 gemini-2.5-flash로 전환
+    # 정식 무료 표준 모델 (일 1,500회 호출 지원)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash", 
+        model="gemini-1.5-flash", 
         google_api_key=api_key,
         temperature=0.2
     )
