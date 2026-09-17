@@ -28,7 +28,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------
-# 📦 Vector DB 자동 다운로드 및 압축 해제 함수 (Toast 알림)
+# 📦 Vector DB 자동 다운로드 및 압축 해제 (화면 차지 없는 미니 토스트 알림)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -73,12 +73,11 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
-# 뉴스 수집 실행 후 즉시 st.rerun() 처리로 UI 화면 즉시 반영
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
-    with st.spinner("제주의소리 최근 24시간 기사를 최신화 중입니다..."):
+    with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
         pipeline = JejuNewsPipeline()
         pipeline.run()
-    st.sidebar.success("제주의소리 최신 뉴스 수집 완료!")
+    st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
 # RAG Vector DB 및 LLM 로드
@@ -173,29 +172,44 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 제주의소리 24h 기사", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 제주의소리 실시간 기사 선택 (안전한 CSV 읽기)
+    # [1] 제주의소리 기사 선택 및 키워드 분류
     with tab1:
         csv_file = "jeju_daily_news.csv"
-        df = pd.DataFrame(columns=["category", "title", "link", "published", "summary"])
+        df = pd.DataFrame(columns=["category", "title", "link", "published", "summary", "tag"])
         
         if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
             try:
                 df = pd.read_csv(csv_file)
             except Exception:
-                df = pd.DataFrame(columns=["category", "title", "link", "published", "summary"])
+                df = pd.DataFrame(columns=["category", "title", "link", "published", "summary", "tag"])
 
         if len(df) > 0:
-            news_titles = df['title'].tolist()
-            
-            selected_title = st.radio(
-                "📰 분석할 현안 기사를 선택하세요 (최근 24시간 내):",
-                news_titles,
-                index=0
+            filter_option = st.selectbox(
+                "📌 현안 분류 필터:",
+                ["전체 (24h)", "제주도정 관련", "위성곤 도지사 관련", "일반 현안"]
             )
             
-            selected_news = df[df['title'] == selected_title].iloc[0]
-            analysis_target["title"] = selected_news['title']
-            analysis_target["summary"] = selected_news['summary']
+            if filter_option == "제주도정 관련":
+                filtered_df = df[df['tag'].str.contains("제주도정", na=False)]
+            elif filter_option == "위성곤 도지사 관련":
+                filtered_df = df[df['tag'].str.contains("위성곤", na=False)]
+            elif filter_option == "일반 현안":
+                filtered_df = df[df['tag'].str.contains("일반현안", na=False)]
+            else:
+                filtered_df = df
+
+            if len(filtered_df) > 0:
+                news_titles = filtered_df['title'].tolist()
+                selected_title = st.radio(
+                    "📰 분석할 현안 기사를 선택하세요:",
+                    news_titles,
+                    index=0
+                )
+                selected_news = filtered_df[filtered_df['title'] == selected_title].iloc[0]
+                analysis_target["title"] = selected_news['title']
+                analysis_target["summary"] = selected_news['summary']
+            else:
+                st.warning(f"선택하신 필터('{filter_option}')에 해당하는 기사가 없습니다.")
         else:
             st.warning("수집된 기사가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
 
