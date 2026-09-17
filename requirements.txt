@@ -1,0 +1,10 @@
+streamlit
+pandas
+requests
+beautifulsoup4
+pypdf
+langchain-huggingface
+langchain-chroma
+langchain-google-genai
+langchain-core
+feedparser
