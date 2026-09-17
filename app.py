@@ -77,7 +77,7 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
-# RAG Vector DB 및 LLM 로드 (자동 모델 폴백 로직 적용)
+# RAG Vector DB 및 LLM 로드 (구글 정식 모델 gemini-3.6-flash 단일 지정)
 @st.cache_resource
 def load_policy_advisor(api_key):
     ensure_vector_db()
@@ -89,37 +89,13 @@ def load_policy_advisor(api_key):
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     
-    # 404/429 방지를 위한 후보 모델 순차 검증
-    candidate_models = [
-        "gemini-2.0-flash", 
-        "gemini-2.0-flash-lite", 
-        "gemini-1.5-flash-latest", 
-        "gemini-3.6-flash"
-    ]
-    
-    selected_llm = None
-    for model_name in candidate_models:
-        try:
-            llm_candidate = ChatGoogleGenerativeAI(
-                model=model_name, 
-                google_api_key=api_key,
-                temperature=0.2
-            )
-            # 연결 테스트
-            llm_candidate.invoke("Ping")
-            selected_llm = llm_candidate
-            break
-        except Exception:
-            continue
-            
-    if selected_llm is None:
-        selected_llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash", 
-            google_api_key=api_key,
-            temperature=0.2
-        )
-        
-    return retriever, selected_llm
+    # 구글 정식 최신 모델 지정 (불필요한 Ping 호출 제거로 쿼터 아낌)
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.6-flash", 
+        google_api_key=api_key,
+        temperature=0.2
+    )
+    return retriever, llm
 
 # ---------------------------------------------------------------------
 # 🛠️ 텍스트 추출 헬퍼 함수
