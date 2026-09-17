@@ -171,27 +171,31 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 제주의소리 24h 기사", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 제주의소리 실시간 기사 선택 (24시간 내 수집분)
+    # [1] 제주의소리 실시간 기사 선택 (안전한 CSV 로딩 처리)
     with tab1:
-        if os.path.exists("jeju_daily_news.csv"):
-            df = pd.read_csv("jeju_daily_news.csv")
+        csv_file = "jeju_daily_news.csv"
+        df = pd.DataFrame(columns=["category", "title", "link", "published", "summary"])
+        
+        if os.path.exists(csv_file) and os.path.getsize(csv_file) > 0:
+            try:
+                df = pd.read_csv(csv_file)
+            except Exception:
+                df = pd.DataFrame(columns=["category", "title", "link", "published", "summary"])
+
+        if len(df) > 0:
+            news_titles = df['title'].tolist()
             
-            if len(df) > 0:
-                news_titles = df['title'].tolist()
-                
-                selected_title = st.radio(
-                    "📰 분석할 현안 기사를 선택하세요 (최근 24시간 내):",
-                    news_titles,
-                    index=0
-                )
-                
-                selected_news = df[df['title'] == selected_title].iloc[0]
-                analysis_target["title"] = selected_news['title']
-                analysis_target["summary"] = selected_news['summary']
-            else:
-                st.warning("최근 24시간 이내에 등록된 제주의소리 기사가 없습니다. 사이드바의 버튼을 눌러 수집하세요.")
+            selected_title = st.radio(
+                "📰 분석할 현안 기사를 선택하세요 (최근 24시간 내):",
+                news_titles,
+                index=0
+            )
+            
+            selected_news = df[df['title'] == selected_title].iloc[0]
+            analysis_target["title"] = selected_news['title']
+            analysis_target["summary"] = selected_news['summary']
         else:
-            st.warning("수집된 뉴스 데이터가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
+            st.warning("수집된 24시간 이내 기사가 없습니다. 사이드바의 [제주의소리 24시간 최신뉴스 수집] 버튼을 눌러주세요.")
 
     # [2] 외부 URL 입력
     with tab2:
