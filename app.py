@@ -22,13 +22,13 @@ from langchain_core.output_parsers import StrOutputParser
 from news_collector import JejuNewsPipeline
 
 st.set_page_config(
-    page_title="제주특별자치도정 현안 대응 AI 지원 시스템",
+    page_title="제주도정 현안 대응 시스템",
     page_icon="🌋",
     layout="wide"
 )
 
 # ---------------------------------------------------------------------
-# 📦 대용량 Vector DB 자동 다운로드 및 압축 해제 함수 (UI 대폭 축소)
+# 📦 대용량 Vector DB 자동 다운로드 및 압축 해제 함수 (Toast 알림)
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -37,7 +37,6 @@ def ensure_vector_db():
 
     if not os.path.exists(db_dir):
         if not os.path.exists(zip_path):
-            # 화면 공간을 차지하지 않는 우측 하단 팝업(Toast) 알림 사용
             st.toast("📦 DB 다운로드 중...", icon="⏳")
             try:
                 urllib.request.urlretrieve(download_url, zip_path)
@@ -83,7 +82,7 @@ if st.sidebar.button("🔄 최신 제주 현안 뉴스 수집"):
 # RAG Vector DB 및 LLM 로드
 @st.cache_resource
 def load_policy_advisor(api_key):
-    ensure_vector_db() # 여기서 실행되며 Toast 알림으로 처리됨
+    ensure_vector_db()
     
     embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
     vectorstore = Chroma(
@@ -162,8 +161,9 @@ def parse_multi_agendas(full_text, llm):
 # ---------------------------------------------------------------------
 # 🖥️ 메인 UI 레이아웃
 # ---------------------------------------------------------------------
-st.title("🌋 민선 9기 제주도정 현안 대응 3축 분석 시스템")
-st.caption("제주특별자치도 정책수석 전용 의사결정 지원 플랫폼")
+# 타이틀 및 캡션 수정 반영 완료
+st.title("🌋 제주도정 현안 대응 시스템")
+st.caption("제주특별자치도 수석 전용 의사결정 지원 플랫폼")
 
 col1, col2 = st.columns([1, 1.2])
 analysis_target = {"title": "", "summary": ""}
@@ -258,9 +258,10 @@ with col1:
 # 📋 3축 분석 및 보고서 출력
 # ---------------------------------------------------------------------
 with col2:
-    st.subheader("📋 3축(정책·법률·정무) 분석 리포트")
+    # 소제목에서 '리포트' 단어 삭제 반영 완료
+    st.subheader("📋 3축(정책·법률·정무) 분석")
     
-    if st.button("🚀 현안 3축 분석 리포트 생성", type="primary", use_container_width=True):
+    if st.button("🚀 현안 3축 분석 생성", type="primary", use_container_width=True):
         if not analysis_target["summary"]:
             st.warning("⚠️ 분석할 데이터가 선택되지 않았습니다.")
         elif not active_api_key:
