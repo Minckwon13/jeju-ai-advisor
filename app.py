@@ -1,6 +1,8 @@
 import os
 import json
 import re
+import zipfile
+import urllib.request
 from datetime import datetime
 import pandas as pd
 import requests
@@ -25,13 +27,39 @@ st.set_page_config(
     layout="wide"
 )
 
-# 사이드바 설정
+# ---------------------------------------------------------------------
+# 📦 대용량 Vector DB 자동 다운로드 및 압축 해제 함수
+# ---------------------------------------------------------------------
+def ensure_vector_db():
+    db_dir = "./jeju_db"
+    zip_path = "jeju_db.zip"
+    
+    # ⚠️ 아래 URL의 'YOUR_GITHUB_ID' 및 'YOUR_REPO_NAME'을 본인의 GitHub 정보로 수정해 주십시오.
+    download_url = "https://github.com/Minckwon13/jeju-ai-advisor/releases/download/v1.0.0/jeju_db.zip"
+
+    if not os.path.exists(db_dir):
+        if not os.path.exists(zip_path):
+            st.info("📦 서버에 Vector DB가 없습니다. GitHub Release에서 DB 파일 다운로드를 시작합니다...")
+            try:
+                urllib.request.urlretrieve(download_url, zip_path)
+                st.success("✅ DB 파일 다운로드 완료!")
+            except Exception as e:
+                st.error(f"❌ DB 다운로드 실패: {e}. Release 링크 주소를 확인해 주십시오.")
+                return
+
+        st.info("📦 DB 파일의 압축을 해제하고 있습니다...")
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(".")
+            st.success("✅ Vector DB 구축 완료!")
+        except Exception as e:
+            st.error(f"❌ DB 압축 해제 실패: {e}")
+
+# ---------------------------------------------------------------------
+# ⚙️ 사이드바 및 보안 API Key 설정
+# ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
-# =====================================================================
-# 🔑 보안 설정: Streamlit Secrets 또는 환경 변수에서 API 키를 안전하게 불러옵니다.
-# 코드에 직접 노출되지 않으므로 GitHub에 올려도 안전합니다.
-# =====================================================================
 secure_api_key = ""
 if "GEMINI_API_KEY" in st.secrets:
     secure_api_key = st.secrets["GEMINI_API_KEY"]
@@ -45,7 +73,7 @@ else:
     active_api_key = st.sidebar.text_input(
         "Gemini API Key 직접 입력", 
         type="password",
-        help="Google AI Studio에서 발급받은 키를 입력하세요. (서버에 키가 설정되지 않은 경우)"
+        help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
 if st.sidebar.button("🔄 최신 제주 현안 및 도지사 동향 수집"):
@@ -57,6 +85,8 @@ if st.sidebar.button("🔄 최신 제주 현안 및 도지사 동향 수집"):
 # RAG Vector DB 및 LLM 로드
 @st.cache_resource
 def load_policy_advisor(api_key):
+    ensure_vector_db()
+    
     embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
     vectorstore = Chroma(
         persist_directory="./jeju_db", 
@@ -64,7 +94,6 @@ def load_policy_advisor(api_key):
     )
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     
-    # 최신 지원 모델 gemini-3.6-flash 지정
     llm = ChatGoogleGenerativeAI(
         model="gemini-3.6-flash", 
         google_api_key=api_key,
@@ -72,7 +101,9 @@ def load_policy_advisor(api_key):
     )
     return retriever, llm
 
-# URL 본문 크롤링
+# ---------------------------------------------------------------------
+# 🛠️ 텍스트 추출 및 처리 헬퍼 함수
+# ---------------------------------------------------------------------
 def extract_text_from_url(url):
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -85,7 +116,6 @@ def extract_text_from_url(url):
     except Exception as e:
         return "URL 추출 오류", f"기사를 불러오는 중 오류 발생: {e}"
 
-# 문서 텍스트 추출 (TXT / PDF)
 def extract_text_from_file(uploaded_file):
     if uploaded_file.name.endswith('.txt'):
         return uploaded_file.read().decode('utf-8')
@@ -100,11 +130,10 @@ def extract_text_from_file(uploaded_file):
         return text
     return ""
 
-# 다중 안건 보고서 AI 파싱
 def parse_multi_agendas(full_text, llm):
     prompt = PromptTemplate.from_template("""
 다음은 제주특별자치도정의 일일보고자료 또는 통합 보고서 텍스트이다.
-문서 내 포함된 개별 안건(보고자료/현안)들을 파싱하여 JSON 배열 형태로 반환하라.
+문서 내 포함된 개별 안건들을 파싱하여 JSON 배열 형태로 반환하라.
 
 [응답 형식 (JSON만 정확히 출력)]
 [
@@ -124,8 +153,7 @@ def parse_multi_agendas(full_text, llm):
     
     clean_json = result_str.strip()
     clean_json = re.sub(r"^`{3}(?:json)?\s*", "", clean_json, flags=re.IGNORECASE)
-    clean_json = re.sub(r"\s*`{3}$", "", clean_json)
-    clean_json = clean_json.strip()
+    clean_json = re.sub(r"\s*`{3}$", "", clean_json).strip()
     
     try:
         return json.loads(clean_json)
@@ -133,9 +161,11 @@ def parse_multi_agendas(full_text, llm):
         st.error(f"안건 구조화 파싱 실패: {e}")
         return []
 
-# UI 메인 헤더
+# ---------------------------------------------------------------------
+# 🖥️ 메인 UI 레이아웃
+# ---------------------------------------------------------------------
 st.title("🌋 민선 9기 제주도정 현안 대응 3축 분석 시스템")
-st.caption("제주특별자치도 위성곤 도지사 보좌 정책수석 전용 의사결정 지원 플랫폼")
+st.caption("제주특별자치도 정책수석 전용 의사결정 지원 플랫폼")
 
 col1, col2 = st.columns([1, 1.2])
 analysis_target = {"title": "", "summary": ""}
@@ -144,18 +174,14 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택 탭
+    # [1] 수집 뉴스 선택
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
-            
             categories = ["전체"] + list(df['category'].unique()) if 'category' in df.columns else ["전체"]
             selected_cat = st.selectbox("분야별 카테고리 필터", categories)
             
-            if selected_cat == "전체":
-                filtered_df = df
-            else:
-                filtered_df = df[df['category'] == selected_cat]
+            filtered_df = df if selected_cat == "전체" else df[df['category'] == selected_cat]
             
             if len(filtered_df) > 0:
                 selected_title = st.radio("분석할 뉴스를 선택하세요:", filtered_df['title'].tolist(), index=0)
@@ -168,7 +194,7 @@ with col1:
         else:
             st.warning("수집된 뉴스 데이터가 없습니다. 사이드바 버튼을 눌러 수집을 진행하세요.")
 
-    # [2] 외부 URL 입력 탭
+    # [2] 외부 URL 입력
     with tab2:
         input_url = st.text_input("분석할 뉴스/기사 URL을 입력하세요:")
         if input_url:
@@ -179,14 +205,13 @@ with col1:
                 st.success(f"**추출된 제목:** {url_title}")
                 st.text_area("추출된 본문 미리보기", url_content[:500], height=150)
 
-    # [3] 문서 파일 업로드 탭
+    # [3] 문서 파일 업로드
     with tab3:
         doc_type = st.radio(
             "문서 유형 선택:", 
             ["단일 안건 보고서", "다중 안건 통합보고서 (일일보고자료 등)"], 
             horizontal=True
         )
-        
         uploaded_file = st.file_uploader("관련 보고서 파일 업로드 (TXT, PDF)", type=["txt", "pdf"])
         
         if uploaded_file is not None:
@@ -197,8 +222,7 @@ with col1:
                 analysis_target["summary"] = raw_text[:3000]
                 st.success(f"'{uploaded_file.name}' 단일 문서 로드 완료!")
                 st.text_area("문서 내용 미리보기", raw_text[:500], height=150)
-                
-            else: # 다중 안건 통합보고서
+            else:
                 st.info("💡 다중 안건 보고서에서 세부 안건 목록을 자동 분류합니다.")
                 if not active_api_key:
                     st.error("⚠️ API 키가 설정되지 않았습니다. 사이드바에 Gemini API Key를 입력하세요.")
@@ -211,7 +235,6 @@ with col1:
                             st.session_state["file_name"] = uploaded_file.name
                     
                     agendas = st.session_state.get("parsed_agendas", [])
-                    
                     if agendas:
                         st.success(f"총 **{len(agendas)}**개의 세부 안건이 확인되었습니다.")
                         agenda_options = [f"[{a.get('id', i+1)}] {a.get('title')} ({a.get('dept', '소관부서')})" for i, a in enumerate(agendas)]
@@ -219,13 +242,15 @@ with col1:
                         
                         selected_idx = agenda_options.index(selected_agenda_str)
                         target_agenda = agendas[selected_idx]
-                        
                         analysis_target["title"] = f"[{target_agenda.get('dept', '도정현안')}] {target_agenda.get('title')}"
                         analysis_target["summary"] = target_agenda.get('content', '')
                         st.info(f"**선택 안건 상세 내용:**\n{analysis_target['summary']}")
                     else:
                         st.warning("안건 파싱 실패. 단일 안건 모드로 전환하여 검토하세요.")
 
+# ---------------------------------------------------------------------
+# 📋 3축 분석 및 보고서 출력
+# ---------------------------------------------------------------------
 with col2:
     st.subheader("📋 3축(정책·법률·정무) 분석 리포트")
     
@@ -245,8 +270,8 @@ with col2:
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
                     prompt_template = """
-너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 2급 지방공무원 상당의 정책수석이야.
-아래 제공된 현안 자료와 상위법령 및 제주도 조례 검색 데이터를 바탕으로 도지사 보고용 1페이지 정책 브리핑 리포트를 작성하라.
+너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 정책수석이야.
+아래 제공된 현안 자료와 상위법령 및 제주도 조례 검색 데이터를 바탕으로 1페이지 정책 브리핑 리포트를 작성하라.
 
 [현안 자료]
 - 제목/안건명: {news_title}
@@ -257,8 +282,8 @@ with col2:
 
 [보고서 작성 가이드라인]
 1. 보고서 상단 헤더:
-   - 별도의 수신자/보고대상은 표기하지 말 것.
-   - 작성자/발신자는 '정책수석'으로 명시.
+   - 별도의 수신자/보고대상(예: 수신: 도지사 등)은 절대로 표기하지 말 것.
+   - 작성자/발신자는 '작성자: 정책수석'으로만 명시할 것 (2급 상당 등 직급 표기 금지).
    - 분석·보고 일시: {current_time} 표기.
 2. 본문 작성 항목:
    - 현안 개요: 이슈 핵심 및 도정에 미치는 영향 요약 (2-3줄)
