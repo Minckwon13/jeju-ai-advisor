@@ -68,7 +68,7 @@ elif "GEMINI_API_KEY" in os.environ:
 
 if secure_api_key:
     active_api_key = secure_api_key
-    st.sidebar.success("🔑 서버 보안(Secrets) API Key 적용 완료")
+    st.sidebar.success("🔑 서버 보안 API Key 적용 완료")
 else:
     active_api_key = st.sidebar.text_input(
         "Gemini API Key 직접 입력", 
@@ -174,7 +174,7 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 수집 뉴스 선택", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 수집 뉴스 선택 (UI 가독성 및 정제 로직 개선)
+    # [1] 수집 뉴스 선택 (모바일 UI 최적화: 카드형 아코디언 방식)
     with tab1:
         if os.path.exists("jeju_daily_news.csv"):
             df = pd.read_csv("jeju_daily_news.csv")
@@ -183,22 +183,31 @@ with col1:
             selected_cat = st.selectbox("📌 분야별 필터", categories)
             
             filtered_df = df if selected_cat == "전체" else df[df['category'] == selected_cat]
-            display_df = filtered_df.head(15)  # 상위 15건으로 제한하여 화면 세로 길이 단축
+            display_df = filtered_df.head(10)  # 모바일 화면 피로도 방지를 위해 상위 10건 세팅
             
             if len(display_df) > 0:
-                news_options = display_df['title'].tolist()
-                selected_title = st.selectbox(
-                    "📰 분석할 제주 현안 뉴스를 선택하세요 (최신 15건):", 
-                    news_options
-                )
+                # 선택된 기사를 기억하기 위한 session_state 세팅
+                if "selected_news" not in st.session_state:
+                    st.session_state["selected_news"] = display_df.iloc[0].to_dict()
                 
-                selected_news = display_df[display_df['title'] == selected_title].iloc[0]
-                analysis_target["title"] = selected_news['title']
-                analysis_target["summary"] = selected_news['summary']
+                st.caption("📱 기사를 터치해 상세 내용을 확인하고 [선택] 버튼을 누르세요.")
                 
-                with st.expander("🔍 선택한 기사 상세 내용 확인", expanded=True):
-                    st.write(f"**제목:** {selected_news['title']}")
-                    st.write(f"**요약:** {selected_news['summary']}")
+                for idx, row in display_df.iterrows():
+                    is_selected = (st.session_state["selected_news"].get("title") == row['title'])
+                    badge = "✅ [선택됨] " if is_selected else "📰 "
+                    
+                    with st.expander(f"{badge}{row['title']}"):
+                        st.write(f"**요약 내용:**\n{row['summary']}")
+                        if st.button("👉 이 기사 분석 대상으로 선택", key=f"btn_{idx}", use_container_width=True):
+                            st.session_state["selected_news"] = row.to_dict()
+                            st.rerun()
+                
+                # 현재 최종 선택된 기사 확정
+                current_selected = st.session_state["selected_news"]
+                analysis_target["title"] = current_selected["title"]
+                analysis_target["summary"] = current_selected["summary"]
+                
+                st.success(f"🎯 **현재 선택된 분석 대상:**\n{analysis_target['title']}")
             else:
                 st.warning(f"'{selected_cat}' 카테고리에 수집된 제주 관련 기사가 없습니다.")
         else:
@@ -264,7 +273,7 @@ with col1:
 with col2:
     st.subheader("📋 3축(정책·법률·정무) 분석 리포트")
     
-    if st.button("🚀 현안 3축 분석 리포트 생성", type="primary"):
+    if st.button("🚀 현안 3축 분석 리포트 생성", type="primary", use_container_width=True):
         if not analysis_target["summary"]:
             st.warning("⚠️ 분석할 데이터가 선택되지 않았습니다.")
         elif not active_api_key:
@@ -319,7 +328,8 @@ with col2:
                         label="📥 보고서 텍스트 다운로드",
                         data=report,
                         file_name=f"정책수석보고_{analysis_target['title'][:10]}.txt",
-                        mime="text/plain"
+                        mime="text/plain",
+                        use_container_width=True
                     )
                 except Exception as e:
                     st.error(f"분석 중 오류 발생: {e}")
