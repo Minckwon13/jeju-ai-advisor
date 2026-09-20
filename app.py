@@ -66,41 +66,30 @@ def load_vector_retriever():
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
 # ---------------------------------------------------------------------
-# 🛡️ 자동 폴백(Fallback) 포함 LLM 호출 엔진
+# 🛡️ 안정적인 LLM 호출 엔진 (Gemini 2.0 Flash 전용)
 # ---------------------------------------------------------------------
-def invoke_llm_with_fallback(prompt_template, input_data, api_key, primary_model):
-    """선택한 모델 실패(404 등) 시 사용 가능한 모델로 자동 전환하여 호출"""
-    candidate_models = [primary_model]
+def invoke_llm(prompt_template, input_data, api_key, model_name):
+    """Gemini 2.0 Flash 및 호환 Lite 모델 안정적 호출"""
+    candidate_models = [model_name, "gemini-2.0-flash-lite", "gemini-2.0-flash"]
+    # 중복 제거
+    candidate_models = list(dict.fromkeys(candidate_models))
     
-    # 폴백 후보 모델 순서 지정
-    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
-        if fallback not in candidate_models:
-            candidate_models.append(fallback)
-            
     last_exception = None
-    
-    for model_name in candidate_models:
+    for target in candidate_models:
         try:
             llm = ChatGoogleGenerativeAI(
-                model=model_name, 
+                model=target, 
                 google_api_key=api_key,
                 temperature=0.2
             )
             chain = prompt_template | llm | StrOutputParser()
-            result = chain.invoke(input_data)
-            
-            # 성공 시, 원래 선택한 모델과 다르면 안내 메시지 출력
-            if model_name != primary_model:
-                st.info(f"💡 선택하신 [{primary_model}] 모델의 API 접근이 불가하여, 호환되는 [{model_name}] 모델로 자동 전환되어 분석을 완결했습니다.")
-            return result, model_name
+            return chain.invoke(input_data)
         except Exception as e:
             last_exception = e
             err_str = str(e)
-            # 404 / NOT_FOUND 에러인 경우 다음 후보 모델로 시도
-            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+            if "404" in err_str or "NOT_FOUND" in err_str:
                 continue
             else:
-                # 쿼터 초과(429) 등 기타 에러는 상위로 전달
                 raise e
                 
     raise last_exception
@@ -108,11 +97,11 @@ def invoke_llm_with_fallback(prompt_template, input_data, api_key, primary_model
 # ---------------------------------------------------------------------
 # 📊 API 쿼터 현황 및 사용량 추적기
 # ---------------------------------------------------------------------
-def render_quota_tracker(selected_model):
+def render_quota_tracker():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 API 호출 및 쿼터 현황")
     
-    max_daily = 50 if "pro" in selected_model else 1500
+    max_daily = 1500  # Gemini 2.0 Flash 일일 권장 한도
     
     today_str = datetime.now().strftime("%Y-%m-%d")
     if "last_date" not in st.session_state or st.session_state["last_date"] != today_str:
@@ -148,7 +137,7 @@ def increment_usage_count():
 # ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
-# 123번째 줄: Gemini API Key 입력 위치 (직접 입력 가능)
+# 105번째 줄: Gemini API Key 입력 위치
 secure_api_key = ""
 
 if "GEMINI_API_KEY" in st.secrets:
@@ -169,22 +158,14 @@ else:
 selected_model_display = st.sidebar.selectbox(
     "🤖 분석 엔진 선택:",
     [
-        "gemini-2.0-flash (추천: 차세대 초고속·고성능)",
-        "gemini-1.5-flash (표준: 높은 안정성 및 신속 처리)",
-        "gemini-1.5-pro (심층 분석용)"
+        "gemini-2.0-flash (권장: 표준 고성능·초고속 엔진)",
+        "gemini-2.0-flash-lite (경량: 빠른 처리)"
     ],
     index=0
 )
 
-if "2.0-flash" in selected_model_display:
-    target_model = "gemini-2.0-flash"
-    st.sidebar.info("🚀 **Gemini 2.0 Flash 활성화**: 최신 차세대 엔진으로 빠른 분석을 제공합니다.")
-elif "pro" in selected_model_display:
-    target_model = "gemini-1.5-pro"
-    st.sidebar.info("🧠 **1.5 Pro 모델 활성화**: 자치법규 및 정책 심층 분석에 특화되어 있습니다.")
-else:
-    target_model = "gemini-1.5-flash"
-    st.sidebar.info("⚡ **1.5 Flash 모델 활성화**: 신속하게 안건을 검토합니다.")
+target_model = "gemini-2.0-flash-lite" if "lite" in selected_model_display else "gemini-2.0-flash"
+st.sidebar.info(f"🚀 **[{target_model}] 엔진 활성화**: 최신 Gemini 2.0 API 규격으로 안정적인 분석을 수행합니다.")
 
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
@@ -193,7 +174,7 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
-render_quota_tracker(target_model)
+render_quota_tracker()
 
 # ---------------------------------------------------------------------
 # 🛠️ 텍스트 추출 헬퍼 함수
@@ -246,7 +227,7 @@ def parse_multi_agendas(full_text, api_key, model_name):
 {text}
 """)
     try:
-        result_str, _ = invoke_llm_with_fallback(
+        result_str = invoke_llm(
             prompt, 
             {"text": full_text[:200000]}, 
             api_key, 
@@ -423,7 +404,7 @@ with col2:
 격식 있고 간결하며, 정무적 통찰력이 돋보이는 어조로 작성할 것.
 """)
                     
-                    report, used_model = invoke_llm_with_fallback(
+                    report = invoke_llm(
                         prompt_template,
                         {
                             "news_title": analysis_target['title'],
@@ -448,11 +429,6 @@ with col2:
                 except Exception as e:
                     err_msg = str(e)
                     if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
-                        retry_match = re.search(r"retry in ([\d\.]+)s", err_msg)
-                        if retry_match:
-                            seconds_wait = float(retry_match.group(1))
-                            st.error(f"⚠️ **분당 호출 한도 초과!** 약 **{int(seconds_wait)}초 후**에 회복됩니다. 잠시 후 다시 시도해 주세요.")
-                        else:
-                            st.error("⚠️ **일일 무료 쿼터 한도를 모두 소진했습니다.** 오늘 오후 5시 자동 초기화 후 다시 사용 가능합니다.")
+                        st.error("⚠️ **분당 호출 한도 초과!** 잠시 후 다시 시도해 주세요.")
                     else:
                         st.error(f"분석 중 오류 발생: {e}")
