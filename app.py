@@ -53,7 +53,7 @@ def ensure_vector_db():
             print(f"DB 압축해제 예외: {e}")
 
 # ---------------------------------------------------------------------
-# 🧠 Vector DB 검색기 로드
+# 🧠 Vector DB 검색기 로드 (RAG 데이터 캐싱)
 # ---------------------------------------------------------------------
 @st.cache_resource
 def load_vector_retriever():
@@ -66,17 +66,31 @@ def load_vector_retriever():
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
 # ---------------------------------------------------------------------
-# 🛡️ Gemini 2.0 Flash 분석 엔진
+# 🛡️ 최신 표준 Gemini 3.6 Flash 호출 엔진 (자동 폴백 탑재)
 # ---------------------------------------------------------------------
 def invoke_llm(prompt_template, input_data, api_key):
-    """표준 모델 gemini-2.0-flash 호출"""
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash", 
-        google_api_key=api_key,
-        temperature=0.2
-    )
-    chain = prompt_template | llm | StrOutputParser()
-    return chain.invoke(input_data)
+    """최신 표준 모델(gemini-3.6-flash) 연동 및 예비 모델 자동 전환"""
+    candidate_models = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
+    
+    last_exception = None
+    for model_name in candidate_models:
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name, 
+                google_api_key=api_key,
+                temperature=0.2
+            )
+            chain = prompt_template | llm | StrOutputParser()
+            return chain.invoke(input_data)
+        except Exception as e:
+            last_exception = e
+            err_str = str(e)
+            if "404" in err_str or "NOT_FOUND" in err_str:
+                continue
+            else:
+                raise e
+                
+    raise last_exception
 
 # ---------------------------------------------------------------------
 # 📊 API 쿼터 현황 추적기
@@ -85,7 +99,7 @@ def render_quota_tracker():
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 API 호출 및 쿼터 현황")
     
-    max_daily = 1500  # Gemini 2.0 Flash 일일 권장 한도
+    max_daily = 1500  # Gemini Flash 계열 일일 권장 한도
     
     today_str = datetime.now().strftime("%Y-%m-%d")
     if "last_date" not in st.session_state or st.session_state["last_date"] != today_str:
@@ -138,7 +152,7 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
-st.sidebar.info("🚀 **[gemini-2.0-flash] 표준 엔진 활성화**: 최신 API 규격으로 신속하고 안정적인 3축 분석을 수행합니다.")
+st.sidebar.info("🚀 **[gemini-3.6-flash] 최신 표준 엔진 활성화**: 구글 API의 최신 규격으로 신속하고 안정적인 3축 분석을 수행합니다.")
 
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
@@ -324,7 +338,7 @@ with col1:
 # 📋 3축 심층 분석 및 보고서 출력
 # ---------------------------------------------------------------------
 with col2:
-    st.subheader("📋 3축(정책·법률·정무) 심층 분석 [gemini-2.0-flash]")
+    st.subheader("📋 3축(정책·법률·정무) 심층 분석 [gemini-3.6-flash]")
     
     if st.button("🚀 심층 3축 분석 보고서 생성", type="primary", use_container_width=True):
         if not analysis_target["summary"]:
@@ -342,7 +356,7 @@ with col2:
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
                     prompt_template = PromptTemplate.from_template("""
-너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 2급 지방공무원 상당의 정책수석이야.
+너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 수석이야.
 제시된 현안 자료와 상위법령/제주도 조례 검색 데이터를 바탕으로, 도지사님의 신속하고 정확한 정무적 판단을 지원할 1페이지 고품질 브리핑 리포트를 작성하라.
 
 [현안 자료]
