@@ -3,7 +3,7 @@ import json
 import re
 import zipfile
 import urllib.request
-from datetime import datetime
+from datetime import datetime, time, timedelta
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -21,14 +21,17 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from news_collector import JejuNewsPipeline
 
+# ---------------------------------------------------------------------
+# 🖥️ 페이지 기본 설정
+# ---------------------------------------------------------------------
 st.set_page_config(
-    page_title="제주도정 현안 대응 시스템",
+    page_title="제주특별자치도 정책수석 의사결정 지원 시스템",
     page_icon="🌋",
     layout="wide"
 )
 
 # ---------------------------------------------------------------------
-# 📦 Vector DB 자동 다운로드 및 압축 해제 (백그라운드 처리)
+# 📦 Vector DB 자동 다운로드 및 압축 해제
 # ---------------------------------------------------------------------
 def ensure_vector_db():
     db_dir = "./jeju_db"
@@ -50,7 +53,45 @@ def ensure_vector_db():
             print(f"DB 압축해제 예외: {e}")
 
 # ---------------------------------------------------------------------
-# ⚙️ 사이드바 및 보안 API Key 설정
+# 📊 API 쿼터 현황 및 사용량 추적기
+# ---------------------------------------------------------------------
+def render_quota_tracker(selected_model):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 API 호출 및 쿼터 현황")
+    
+    max_daily = 50 if "pro" in selected_model else 1500
+    
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if "last_date" not in st.session_state or st.session_state["last_date"] != today_str:
+        st.session_state["last_date"] = today_str
+        st.session_state["daily_call_count"] = 0
+        
+    used_calls = st.session_state.get("daily_call_count", 0)
+    remaining_calls = max(0, max_daily - used_calls)
+    usage_pct = min(1.0, used_calls / max_daily)
+    
+    st.sidebar.write(f"**오늘 사용량:** `{used_calls}` / `{max_daily}` 회")
+    st.sidebar.progress(usage_pct)
+    st.sidebar.caption(f"💡 잔여 예상 횟수: **{remaining_calls}회**")
+    
+    now = datetime.now()
+    reset_time_today = datetime.combine(now.date(), time(17, 0, 0)) # 한국시간 17시 기준 (PST 00시)
+    if now > reset_time_today:
+        next_reset = reset_time_today + timedelta(days=1)
+    else:
+        next_reset = reset_time_today
+        
+    time_left = next_reset - now
+    hours, remainder = divmod(int(time_left.total_seconds()), 3600)
+    minutes, seconds = divmod(remainder, 60)
+    
+    st.sidebar.info(f"⏰ **일일 쿼터 리셋까지:** {hours}시간 {minutes}분 남음\n*(매일 오후 5시 자동 초기화)*")
+
+def increment_usage_count():
+    st.session_state["daily_call_count"] = st.session_state.get("daily_call_count", 0) + 1
+
+# ---------------------------------------------------------------------
+# ⚙️ 사이드바 시스템 설정
 # ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
@@ -70,6 +111,22 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
+selected_model_display = st.sidebar.selectbox(
+    "🤖 분석 엔진 선택:",
+    [
+        "gemini-1.5-pro (중요 안건 심층 분석용)", 
+        "gemini-1.5-flash (신속 분석 및 대량 처리용)"
+    ],
+    index=0
+)
+
+if "pro" in selected_model_display:
+    target_model = "gemini-1.5-pro"
+    st.sidebar.info("🧠 **Pro 모델 활성화**: 법률 대조 및 정무 리스크 추론 정확도가 극대화됩니다. (일일 50회 권장)")
+else:
+    target_model = "gemini-1.5-flash"
+    st.sidebar.info("⚡ **Flash 모델 활성화**: 빠른 속도로 대량 기사를 분석합니다. (일일 1,500회 가능)")
+
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
         pipeline = JejuNewsPipeline()
@@ -77,9 +134,13 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.sidebar.success("최신 뉴스 수집 완료!")
     st.rerun()
 
-# RAG Vector DB 및 LLM 로드 (구글 정식 모델 gemini-3.6-flash 단일 지정)
+render_quota_tracker(target_model)
+
+# ---------------------------------------------------------------------
+# 🧠 RAG Vector DB & LLM 로드 (캐싱 최적화)
+# ---------------------------------------------------------------------
 @st.cache_resource
-def load_policy_advisor(api_key):
+def load_policy_advisor(api_key, model_name):
     ensure_vector_db()
     
     embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
@@ -87,11 +148,10 @@ def load_policy_advisor(api_key):
         persist_directory="./jeju_db", 
         embedding_function=embeddings
     )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
     
-    # 구글 정식 최신 모델 지정 (불필요한 Ping 호출 제거로 쿼터 아낌)
     llm = ChatGoogleGenerativeAI(
-        model="gemini-3.6-flash", 
+        model=model_name, 
         google_api_key=api_key,
         temperature=0.2
     )
@@ -117,7 +177,7 @@ def extract_text_from_file(uploaded_file):
         return uploaded_file.read().decode('utf-8')
     elif uploaded_file.name.endswith('.pdf'):
         if PdfReader is None:
-            st.error("pypdf 패키지가 필요합니다.")
+            st.error("pypdf 패키지가 설치되지 않았습니다.")
             return ""
         pdf_reader = PdfReader(uploaded_file)
         text = ""
@@ -161,7 +221,7 @@ def parse_multi_agendas(full_text, llm):
 # 🖥️ 메인 UI 레이아웃
 # ---------------------------------------------------------------------
 st.title("🌋 제주도정 현안 대응 시스템")
-st.caption("제주특별자치도 수석 전용 의사결정 지원 플랫폼")
+st.caption("제주특별자치도 민선 9기 정책수석 전용 의사결정 지원 플랫폼")
 
 col1, col2 = st.columns([1, 1.2])
 analysis_target = {"title": "", "summary": ""}
@@ -170,7 +230,7 @@ with col1:
     st.subheader("📥 분석 대상 데이터 입력")
     tab1, tab2, tab3 = st.tabs(["📰 제주의소리 24h 기사", "🔗 외부 URL 입력", "📁 문서 파일 업로드"])
     
-    # [1] 제주의소리 기사 선택 및 키워드 분류
+    # [1] 제주의소리 기사 선택
     with tab1:
         csv_file = "jeju_daily_news.csv"
         df = pd.DataFrame(columns=["category", "title", "link", "published", "summary", "tag"])
@@ -246,7 +306,7 @@ with col1:
                 else:
                     if "parsed_agendas" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
                         with st.spinner("AI가 보고서 내 개별 안건 목록을 분석 중입니다..."):
-                            _, llm = load_policy_advisor(active_api_key)
+                            _, llm = load_policy_advisor(active_api_key, target_model)
                             parsed_agendas = parse_multi_agendas(raw_text, llm)
                             st.session_state["parsed_agendas"] = parsed_agendas
                             st.session_state["file_name"] = uploaded_file.name
@@ -266,20 +326,20 @@ with col1:
                         st.warning("안건 파싱 실패. 단일 안건 모드로 전환하여 검토하세요.")
 
 # ---------------------------------------------------------------------
-# 📋 3축 분석 및 보고서 출력
+# 📋 3축 심층 분석 및 보고서 출력
 # ---------------------------------------------------------------------
 with col2:
-    st.subheader("📋 3축(정책·법률·정무) 분석")
+    st.subheader(f"📋 3축(정책·법률·정무) 심층 분석 [{target_model}]")
     
-    if st.button("🚀 현안 3축 분석 생성", type="primary", use_container_width=True):
+    if st.button("🚀 심층 3축 분석 보고서 생성", type="primary", use_container_width=True):
         if not analysis_target["summary"]:
             st.warning("⚠️ 분석할 데이터가 선택되지 않았습니다.")
         elif not active_api_key:
             st.error("⚠️ Gemini API Key가 입력되지 않았습니다! 사이드바 입력창에 입력해 주세요.")
         else:
-            with st.spinner("제주특별법 및 관련 도 조례 DB 검토 중..."):
+            with st.spinner(f"[{target_model}] 엔진이 제주특별법 및 도 조례 DB를 정밀 분석 중입니다..."):
                 try:
-                    retriever, llm = load_policy_advisor(active_api_key)
+                    retriever, llm = load_policy_advisor(active_api_key, target_model)
                     current_time = datetime.now().strftime("%Y년 %m월 %d일 %H시 %M분")
                     
                     query = f"{analysis_target['title']} {analysis_target['summary']}"
@@ -287,8 +347,8 @@ with col2:
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
                     prompt_template = """
-너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 정책수석이야.
-아래 제공된 현안 자료와 상위법령 및 제주도 조례 검색 데이터를 바탕으로 1페이지 정책 브리핑 리포트를 작성하라.
+너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 2급 지방공무원 상당의 정책수석이야.
+제시된 현안 자료와 상위법령/제주도 조례 검색 데이터를 바탕으로, 도지사님의 신속하고 정확한 정무적 판단을 지원할 1페이지 고품질 브리핑 리포트를 작성하라.
 
 [현안 자료]
 - 제목/안건명: {news_title}
@@ -298,18 +358,27 @@ with col2:
 {context_law}
 
 [보고서 작성 가이드라인]
-1. 보고서 상단 헤더:
-   - 별도의 수신자/보고대상(예: 수신: 도지사 등)은 절대로 표기하지 말 것.
-   - 작성자/발신자는 '작성자: 정책수석'으로만 명시할 것 (직급/등급 표기 금지).
-   - 분석·보고 일시: {current_time} 표기.
-2. 본문 작성 항목:
-   - 현안 개요: 이슈 핵심 및 도정에 미치는 영향 요약 (2-3줄)
-   - 법률적 검토: 제주특별법 특례 적용 여부, 관련 도 조례 저촉성 및 행정 조치 근거
-   - 정무적 판단: 도민 정서 파급력, 여론 및 의회/언론 리스크 평가 (위험도: 상/중/하 명시)
-   - 정책 대안: 단기 부서 조치 및 민선 9기 공약 연계 중장기 대책
-   - 도정 메시지 방안: 공식 브리핑용 핵심 메시지(Key Message) 및 도민 설득 프레임
+1. 보고서 헤더:
+   - 별도의 수신자 표기(수신: 도지사 등)는 일체 제외.
+   - 작성자: '작성자: 정책수석'으로 단일 표기.
+   - 분석 일시: {current_time}
 
-보고서는 격식 있고 명확한 어조로 작성할 것.
+2. 3축 심층 분석 항목:
+   - **현안 개요**: 이슈의 핵심, 갈등 발생 배경 및 도정에 미칠 직접적 파급력 (2-3줄)
+   - **법률·조례 검토**: 
+     * 검색된 제주특별법 특례 및 관련 도 조례 조항과의 연계성 검토
+     * 도의 행정 조치(명령, 재정 지원, 조례 개정 등)에 대한 법적 당위성 및 저촉 여부 진단
+   - **정무적 판단 & 리스크 평가**: 
+     * 도민 민심, 지역 언론의 프레임, 제주도의회 대응 기류 분석
+     * 정무적 위험도 명시 (**상 / 중 / 하**) 및 주요 리스크 요인 도출
+   - **단계별 정책 대안**:
+     * [단기] 소관 부서 즉시 조치 사항 (1~3일 내)
+     * [중장기] 민선 9기 공약 및 제주 도정 비전과 연계한 근본 대책
+   - **도정 홍보 및 메시지 방안**:
+     * 도지사 공식 브리핑용 핵심 메시지 (Key Message 1~2줄)
+     * 도민 설득 및 여론 반전을 위한 톤앤매너 프레임 가이드
+
+격식 있고 간결하며, 정무적 통찰력이 돋보이는 어조로 작성할 것.
 """
                     prompt = PromptTemplate.from_template(prompt_template)
                     chain = prompt | llm | StrOutputParser()
@@ -317,9 +386,13 @@ with col2:
                     report = chain.invoke({
                         "news_title": analysis_target['title'],
                         "news_summary": analysis_target['summary'],
-                        "context_law": context_law if context_law else "관련 법령/조례 검색 결과 없음",
+                        "context_law": context_law if context_law else "관련 법령/조례 검색 결과 없음 (일반 지방자치법령 적용 필요)",
                         "current_time": current_time
                     })
+                    
+                    # 성공 시 사용량 카운트 1 증가
+                    increment_usage_count()
+                    st.rerun() # UI의 쿼터 사용량 잔여 카운터 즉시 갱신
                     
                     st.markdown(report)
                     st.download_button(
@@ -330,4 +403,13 @@ with col2:
                         use_container_width=True
                     )
                 except Exception as e:
-                    st.error(f"분석 중 오류 발생: {e}")
+                    err_msg = str(e)
+                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                        retry_match = re.search(r"retry in ([\d\.]+)s", err_msg)
+                        if retry_match:
+                            seconds_wait = float(retry_match.group(1))
+                            st.error(f"⚠️ **분당 호출 한도 초과!** 약 **{int(seconds_wait)}초 후**에 회복됩니다. 잠시 후 다시 시도해 주세요.")
+                        else:
+                            st.error("⚠️ **일일 무료 쿼터 한도를 모두 소진했습니다.** 오늘 오후 5시 자동 초기화 후 다시 사용 가능하며, 급한 분석 건은 사이드바에서 `gemini-1.5-flash` 모델로 전환하여 시도해 주세요.")
+                    else:
+                        st.error(f"분석 중 오류 발생: {e}")
