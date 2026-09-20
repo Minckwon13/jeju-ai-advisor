@@ -53,7 +53,7 @@ def ensure_vector_db():
             print(f"DB 압축해제 예외: {e}")
 
 # ---------------------------------------------------------------------
-# 🧠 Vector DB 검색기 로드 (RAG 데이터만 캐싱)
+# 🧠 Vector DB 검색기 로드
 # ---------------------------------------------------------------------
 @st.cache_resource
 def load_vector_retriever():
@@ -66,36 +66,20 @@ def load_vector_retriever():
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
 # ---------------------------------------------------------------------
-# 🛡️ 안정적인 LLM 호출 엔진 (Gemini 2.0 Flash 전용)
+# 🛡️ Gemini 2.0 Flash 분석 엔진
 # ---------------------------------------------------------------------
-def invoke_llm(prompt_template, input_data, api_key, model_name):
-    """Gemini 2.0 Flash 및 호환 Lite 모델 안정적 호출"""
-    candidate_models = [model_name, "gemini-2.0-flash-lite", "gemini-2.0-flash"]
-    # 중복 제거
-    candidate_models = list(dict.fromkeys(candidate_models))
-    
-    last_exception = None
-    for target in candidate_models:
-        try:
-            llm = ChatGoogleGenerativeAI(
-                model=target, 
-                google_api_key=api_key,
-                temperature=0.2
-            )
-            chain = prompt_template | llm | StrOutputParser()
-            return chain.invoke(input_data)
-        except Exception as e:
-            last_exception = e
-            err_str = str(e)
-            if "404" in err_str or "NOT_FOUND" in err_str:
-                continue
-            else:
-                raise e
-                
-    raise last_exception
+def invoke_llm(prompt_template, input_data, api_key):
+    """표준 모델 gemini-2.0-flash 호출"""
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash", 
+        google_api_key=api_key,
+        temperature=0.2
+    )
+    chain = prompt_template | llm | StrOutputParser()
+    return chain.invoke(input_data)
 
 # ---------------------------------------------------------------------
-# 📊 API 쿼터 현황 및 사용량 추적기
+# 📊 API 쿼터 현황 추적기
 # ---------------------------------------------------------------------
 def render_quota_tracker():
     st.sidebar.markdown("---")
@@ -137,7 +121,6 @@ def increment_usage_count():
 # ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
-# 105번째 줄: Gemini API Key 입력 위치
 secure_api_key = ""
 
 if "GEMINI_API_KEY" in st.secrets:
@@ -155,17 +138,7 @@ else:
         help="Google AI Studio에서 발급받은 키를 입력하세요."
     )
 
-selected_model_display = st.sidebar.selectbox(
-    "🤖 분석 엔진 선택:",
-    [
-        "gemini-2.0-flash (권장: 표준 고성능·초고속 엔진)",
-        "gemini-2.0-flash-lite (경량: 빠른 처리)"
-    ],
-    index=0
-)
-
-target_model = "gemini-2.0-flash-lite" if "lite" in selected_model_display else "gemini-2.0-flash"
-st.sidebar.info(f"🚀 **[{target_model}] 엔진 활성화**: 최신 Gemini 2.0 API 규격으로 안정적인 분석을 수행합니다.")
+st.sidebar.info("🚀 **[gemini-2.0-flash] 표준 엔진 활성화**: 최신 API 규격으로 신속하고 안정적인 3축 분석을 수행합니다.")
 
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
@@ -208,7 +181,7 @@ def extract_text_from_file(uploaded_file):
         return text
     return ""
 
-def parse_multi_agendas(full_text, api_key, model_name):
+def parse_multi_agendas(full_text, api_key):
     prompt = PromptTemplate.from_template("""
 다음은 제주특별자치도정의 일일보고자료 또는 통합 보고서 텍스트이다.
 문서 내 포함된 개별 안건들을 파싱하여 JSON 배열 형태로 반환하라.
@@ -230,8 +203,7 @@ def parse_multi_agendas(full_text, api_key, model_name):
         result_str = invoke_llm(
             prompt, 
             {"text": full_text[:200000]}, 
-            api_key, 
-            model_name
+            api_key
         )
         clean_json = result_str.strip()
         clean_json = re.sub(r"^`{3}(?:json)?\s*", "", clean_json, flags=re.IGNORECASE)
@@ -330,7 +302,7 @@ with col1:
                 else:
                     if "parsed_agendas" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
                         with st.spinner("AI가 보고서 내 개별 안건 목록을 분석 중입니다..."):
-                            parsed_agendas = parse_multi_agendas(raw_text, active_api_key, target_model)
+                            parsed_agendas = parse_multi_agendas(raw_text, active_api_key)
                             st.session_state["parsed_agendas"] = parsed_agendas
                             st.session_state["file_name"] = uploaded_file.name
                     
@@ -352,7 +324,7 @@ with col1:
 # 📋 3축 심층 분석 및 보고서 출력
 # ---------------------------------------------------------------------
 with col2:
-    st.subheader(f"📋 3축(정책·법률·정무) 심층 분석 [{target_model}]")
+    st.subheader("📋 3축(정책·법률·정무) 심층 분석 [gemini-2.0-flash]")
     
     if st.button("🚀 심층 3축 분석 보고서 생성", type="primary", use_container_width=True):
         if not analysis_target["summary"]:
@@ -360,7 +332,7 @@ with col2:
         elif not active_api_key:
             st.error("⚠️ Gemini API Key가 입력되지 않았습니다! 사이드바 입력창에 입력해 주세요.")
         else:
-            with st.spinner(f"[{target_model}] 엔진이 제주특별법 및 도 조례 DB를 정밀 분석 중입니다..."):
+            with st.spinner("엔진이 제주특별법 및 도 조례 DB를 정밀 분석 중입니다..."):
                 try:
                     retriever = load_vector_retriever()
                     current_time = datetime.now().strftime("%Y년 %m월 %d일 %H시 %M분")
@@ -370,7 +342,7 @@ with col2:
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
                     prompt_template = PromptTemplate.from_template("""
-너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 수석이야.
+너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 2급 지방공무원 상당의 정책수석이야.
 제시된 현안 자료와 상위법령/제주도 조례 검색 데이터를 바탕으로, 도지사님의 신속하고 정확한 정무적 판단을 지원할 1페이지 고품질 브리핑 리포트를 작성하라.
 
 [현안 자료]
@@ -412,8 +384,7 @@ with col2:
                             "context_law": context_law if context_law else "관련 법령/조례 검색 결과 없음 (일반 지방자치법령 적용 필요)",
                             "current_time": current_time
                         },
-                        active_api_key,
-                        target_model
+                        active_api_key
                     )
                     
                     increment_usage_count()
