@@ -53,13 +53,65 @@ def ensure_vector_db():
             print(f"DB 압축해제 예외: {e}")
 
 # ---------------------------------------------------------------------
+# 🧠 Vector DB 검색기 로드 (RAG 데이터만 캐싱)
+# ---------------------------------------------------------------------
+@st.cache_resource
+def load_vector_retriever():
+    ensure_vector_db()
+    embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
+    vectorstore = Chroma(
+        persist_directory="./jeju_db", 
+        embedding_function=embeddings
+    )
+    return vectorstore.as_retriever(search_kwargs={"k": 5})
+
+# ---------------------------------------------------------------------
+# 🛡️ 자동 폴백(Fallback) 포함 LLM 호출 엔진
+# ---------------------------------------------------------------------
+def invoke_llm_with_fallback(prompt_template, input_data, api_key, primary_model):
+    """선택한 모델 실패(404 등) 시 사용 가능한 모델로 자동 전환하여 호출"""
+    candidate_models = [primary_model]
+    
+    # 폴백 후보 모델 순서 지정
+    for fallback in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]:
+        if fallback not in candidate_models:
+            candidate_models.append(fallback)
+            
+    last_exception = None
+    
+    for model_name in candidate_models:
+        try:
+            llm = ChatGoogleGenerativeAI(
+                model=model_name, 
+                google_api_key=api_key,
+                temperature=0.2
+            )
+            chain = prompt_template | llm | StrOutputParser()
+            result = chain.invoke(input_data)
+            
+            # 성공 시, 원래 선택한 모델과 다르면 안내 메시지 출력
+            if model_name != primary_model:
+                st.info(f"💡 선택하신 [{primary_model}] 모델의 API 접근이 불가하여, 호환되는 [{model_name}] 모델로 자동 전환되어 분석을 완결했습니다.")
+            return result, model_name
+        except Exception as e:
+            last_exception = e
+            err_str = str(e)
+            # 404 / NOT_FOUND 에러인 경우 다음 후보 모델로 시도
+            if "404" in err_str or "NOT_FOUND" in err_str or "not found" in err_str.lower():
+                continue
+            else:
+                # 쿼터 초과(429) 등 기타 에러는 상위로 전달
+                raise e
+                
+    raise last_exception
+
+# ---------------------------------------------------------------------
 # 📊 API 쿼터 현황 및 사용량 추적기
 # ---------------------------------------------------------------------
 def render_quota_tracker(selected_model):
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 API 호출 및 쿼터 현황")
     
-    # 모델별 일일 권장 호출 한도 설정
     max_daily = 50 if "pro" in selected_model else 1500
     
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -96,7 +148,7 @@ def increment_usage_count():
 # ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
-# Gemini API Key 설정 (필요 시 아래 큰따옴표 안에 키 직접 입력 가능)
+# 123번째 줄: Gemini API Key 입력 위치 (직접 입력 가능)
 secure_api_key = ""
 
 if "GEMINI_API_KEY" in st.secrets:
@@ -118,22 +170,21 @@ selected_model_display = st.sidebar.selectbox(
     "🤖 분석 엔진 선택:",
     [
         "gemini-2.0-flash (추천: 차세대 초고속·고성능)",
-        "gemini-1.5-pro-002 (중요 안건 심층 분석용)", 
-        "gemini-1.5-flash (신속 분석 및 대량 처리용)"
+        "gemini-1.5-flash (표준: 높은 안정성 및 신속 처리)",
+        "gemini-1.5-pro (심층 분석용)"
     ],
     index=0
 )
 
-# 구글 API 정식 표준 모델명 매핑
 if "2.0-flash" in selected_model_display:
     target_model = "gemini-2.0-flash"
-    st.sidebar.info("🚀 **Gemini 2.0 Flash 활성화**: 가장 빠른 속도와 뛰어난 정무 추론 능력을 제공합니다.")
-elif "1.5-pro" in selected_model_display:
-    target_model = "gemini-1.5-pro-002"
-    st.sidebar.info("🧠 **1.5 Pro 모델 활성화**: 자치법규 정밀 대조 및 심층 법률 검토에 특화되어 있습니다.")
+    st.sidebar.info("🚀 **Gemini 2.0 Flash 활성화**: 최신 차세대 엔진으로 빠른 분석을 제공합니다.")
+elif "pro" in selected_model_display:
+    target_model = "gemini-1.5-pro"
+    st.sidebar.info("🧠 **1.5 Pro 모델 활성화**: 자치법규 및 정책 심층 분석에 특화되어 있습니다.")
 else:
     target_model = "gemini-1.5-flash"
-    st.sidebar.info("⚡ **1.5 Flash 모델 활성화**: 대량 기사 및 안건을 신속하게 처리합니다.")
+    st.sidebar.info("⚡ **1.5 Flash 모델 활성화**: 신속하게 안건을 검토합니다.")
 
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
@@ -143,27 +194,6 @@ if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     st.rerun()
 
 render_quota_tracker(target_model)
-
-# ---------------------------------------------------------------------
-# 🧠 RAG Vector DB & LLM 로드 (캐싱 최적화)
-# ---------------------------------------------------------------------
-@st.cache_resource
-def load_policy_advisor(api_key, model_name):
-    ensure_vector_db()
-    
-    embeddings = HuggingFaceEmbeddings(model_name="jhgan/ko-sroberta-multitask")
-    vectorstore = Chroma(
-        persist_directory="./jeju_db", 
-        embedding_function=embeddings
-    )
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
-    
-    llm = ChatGoogleGenerativeAI(
-        model=model_name, 
-        google_api_key=api_key,
-        temperature=0.2
-    )
-    return retriever, llm
 
 # ---------------------------------------------------------------------
 # 🛠️ 텍스트 추출 헬퍼 함수
@@ -197,7 +227,7 @@ def extract_text_from_file(uploaded_file):
         return text
     return ""
 
-def parse_multi_agendas(full_text, llm):
+def parse_multi_agendas(full_text, api_key, model_name):
     prompt = PromptTemplate.from_template("""
 다음은 제주특별자치도정의 일일보고자료 또는 통합 보고서 텍스트이다.
 문서 내 포함된 개별 안건들을 파싱하여 JSON 배열 형태로 반환하라.
@@ -215,14 +245,16 @@ def parse_multi_agendas(full_text, llm):
 [보고서 텍스트]
 {text}
 """)
-    chain = prompt | llm | StrOutputParser()
-    result_str = chain.invoke({"text": full_text[:200000]})
-    
-    clean_json = result_str.strip()
-    clean_json = re.sub(r"^`{3}(?:json)?\s*", "", clean_json, flags=re.IGNORECASE)
-    clean_json = re.sub(r"\s*`{3}$", "", clean_json).strip()
-    
     try:
+        result_str, _ = invoke_llm_with_fallback(
+            prompt, 
+            {"text": full_text[:200000]}, 
+            api_key, 
+            model_name
+        )
+        clean_json = result_str.strip()
+        clean_json = re.sub(r"^`{3}(?:json)?\s*", "", clean_json, flags=re.IGNORECASE)
+        clean_json = re.sub(r"\s*`{3}$", "", clean_json).strip()
         return json.loads(clean_json)
     except Exception as e:
         st.error(f"안건 구조화 파싱 실패: {e}")
@@ -317,8 +349,7 @@ with col1:
                 else:
                     if "parsed_agendas" not in st.session_state or st.session_state.get("file_name") != uploaded_file.name:
                         with st.spinner("AI가 보고서 내 개별 안건 목록을 분석 중입니다..."):
-                            _, llm = load_policy_advisor(active_api_key, target_model)
-                            parsed_agendas = parse_multi_agendas(raw_text, llm)
+                            parsed_agendas = parse_multi_agendas(raw_text, active_api_key, target_model)
                             st.session_state["parsed_agendas"] = parsed_agendas
                             st.session_state["file_name"] = uploaded_file.name
                     
@@ -350,14 +381,14 @@ with col2:
         else:
             with st.spinner(f"[{target_model}] 엔진이 제주특별법 및 도 조례 DB를 정밀 분석 중입니다..."):
                 try:
-                    retriever, llm = load_policy_advisor(active_api_key, target_model)
+                    retriever = load_vector_retriever()
                     current_time = datetime.now().strftime("%Y년 %m월 %d일 %H시 %M분")
                     
                     query = f"{analysis_target['title']} {analysis_target['summary']}"
                     relevant_docs = retriever.invoke(query)
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
-                    prompt_template = """
+                    prompt_template = PromptTemplate.from_template("""
 너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 수석이야.
 제시된 현안 자료와 상위법령/제주도 조례 검색 데이터를 바탕으로, 도지사님의 신속하고 정확한 정무적 판단을 지원할 1페이지 고품질 브리핑 리포트를 작성하라.
 
@@ -390,18 +421,20 @@ with col2:
      * 도민 설득 및 여론 반전을 위한 톤앤매너 프레임 가이드
 
 격식 있고 간결하며, 정무적 통찰력이 돋보이는 어조로 작성할 것.
-"""
-                    prompt = PromptTemplate.from_template(prompt_template)
-                    chain = prompt | llm | StrOutputParser()
+""")
                     
-                    report = chain.invoke({
-                        "news_title": analysis_target['title'],
-                        "news_summary": analysis_target['summary'],
-                        "context_law": context_law if context_law else "관련 법령/조례 검색 결과 없음 (일반 지방자치법령 적용 필요)",
-                        "current_time": current_time
-                    })
+                    report, used_model = invoke_llm_with_fallback(
+                        prompt_template,
+                        {
+                            "news_title": analysis_target['title'],
+                            "news_summary": analysis_target['summary'],
+                            "context_law": context_law if context_law else "관련 법령/조례 검색 결과 없음 (일반 지방자치법령 적용 필요)",
+                            "current_time": current_time
+                        },
+                        active_api_key,
+                        target_model
+                    )
                     
-                    # 성공 시 사용량 카운트 1 증가
                     increment_usage_count()
                     
                     st.markdown(report)
@@ -414,14 +447,12 @@ with col2:
                     )
                 except Exception as e:
                     err_msg = str(e)
-                    if "404" in err_msg or "NOT_FOUND" in err_msg:
-                        st.error("⚠️ **지정된 모델을 찾을 수 없습니다.** 사이드바 분석 엔진에서 `gemini-2.0-flash`로 변경해 보세요.")
-                    elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                    if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
                         retry_match = re.search(r"retry in ([\d\.]+)s", err_msg)
                         if retry_match:
                             seconds_wait = float(retry_match.group(1))
                             st.error(f"⚠️ **분당 호출 한도 초과!** 약 **{int(seconds_wait)}초 후**에 회복됩니다. 잠시 후 다시 시도해 주세요.")
                         else:
-                            st.error("⚠️ **일일 무료 쿼터 한도를 모두 소진했습니다.** 오늘 오후 5시 자동 초기화 후 다시 사용 가능하며, 급한 분석 건은 `gemini-2.0-flash` 모델로 전환해 시도해 주세요.")
+                            st.error("⚠️ **일일 무료 쿼터 한도를 모두 소진했습니다.** 오늘 오후 5시 자동 초기화 후 다시 사용 가능합니다.")
                     else:
                         st.error(f"분석 중 오류 발생: {e}")
