@@ -59,11 +59,8 @@ def render_quota_tracker(selected_model):
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 API 호출 및 쿼터 현황")
     
-    # 모델별 일일 호출 권장 한도 설정
-    if "pro" in selected_model:
-        max_daily = 50
-    else:
-        max_daily = 1500
+    # 모델별 일일 권장 호출 한도 설정
+    max_daily = 50 if "pro" in selected_model else 1500
     
     today_str = datetime.now().strftime("%Y-%m-%d")
     if "last_date" not in st.session_state or st.session_state["last_date"] != today_str:
@@ -99,8 +96,8 @@ def increment_usage_count():
 # ---------------------------------------------------------------------
 st.sidebar.header("⚙️ 시스템 설정")
 
-# 76번째 줄: Gemini API Key 설정 (직접 하드코딩 가능)
-secure_api_key = "" 
+# Gemini API Key 설정 (필요 시 아래 큰따옴표 안에 키 직접 입력 가능)
+secure_api_key = ""
 
 if "GEMINI_API_KEY" in st.secrets:
     secure_api_key = st.secrets["GEMINI_API_KEY"]
@@ -120,23 +117,23 @@ else:
 selected_model_display = st.sidebar.selectbox(
     "🤖 분석 엔진 선택:",
     [
-        "gemini-2.0-flash (차세대 고성능·초고속 엔진 추천)",
-        "gemini-1.5-pro (중요 안건 심층 분석용)", 
+        "gemini-2.0-flash (추천: 차세대 초고속·고성능)",
+        "gemini-1.5-pro-002 (중요 안건 심층 분석용)", 
         "gemini-1.5-flash (신속 분석 및 대량 처리용)"
     ],
     index=0
 )
 
-# API 엔드포인트 호환 표준 모델명 매핑
+# 구글 API 정식 표준 모델명 매핑
 if "2.0-flash" in selected_model_display:
     target_model = "gemini-2.0-flash"
-    st.sidebar.info("🚀 **Gemini 2.0 Flash 활성화**: 최신 차세대 모델로 빠른 속도와 높은 정무 추론 능력을 제공합니다.")
+    st.sidebar.info("🚀 **Gemini 2.0 Flash 활성화**: 가장 빠른 속도와 뛰어난 정무 추론 능력을 제공합니다.")
 elif "1.5-pro" in selected_model_display:
-    target_model = "gemini-1.5-pro-latest"
-    st.sidebar.info("🧠 **1.5 Pro 모델 활성화**: 대용량 자치법규 정밀 대조 및 심층 법률 검토에 특화되어 있습니다.")
+    target_model = "gemini-1.5-pro-002"
+    st.sidebar.info("🧠 **1.5 Pro 모델 활성화**: 자치법규 정밀 대조 및 심층 법률 검토에 특화되어 있습니다.")
 else:
-    target_model = "gemini-1.5-flash-latest"
-    st.sidebar.info("⚡ **1.5 Flash 모델 활성화**: 빠른 속도로 대량의 기사 및 안건을 즉시 처리합니다.")
+    target_model = "gemini-1.5-flash"
+    st.sidebar.info("⚡ **1.5 Flash 모델 활성화**: 대량 기사 및 안건을 신속하게 처리합니다.")
 
 if st.sidebar.button("🔄 제주의소리 24시간 최신뉴스 수집"):
     with st.spinner("제주의소리 최근 24시간 기사를 수집 및 분류 중입니다..."):
@@ -361,7 +358,7 @@ with col2:
                     context_law = "\n\n".join([f"[{doc.metadata.get('name', '관련 법령/조례')}]\n{doc.page_content}" for doc in relevant_docs])
                     
                     prompt_template = """
-너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 2급 지방공무원 상당의 정책수석이야.
+너는 제주특별자치도의 민선 9기 위성곤 도지사를 보좌하는 수석이야.
 제시된 현안 자료와 상위법령/제주도 조례 검색 데이터를 바탕으로, 도지사님의 신속하고 정확한 정무적 판단을 지원할 1페이지 고품질 브리핑 리포트를 작성하라.
 
 [현안 자료]
@@ -404,7 +401,7 @@ with col2:
                         "current_time": current_time
                     })
                     
-                    # 성공 시 사용량 카운트 증가 및 즉시 새로고침
+                    # 성공 시 사용량 카운트 1 증가
                     increment_usage_count()
                     
                     st.markdown(report)
@@ -418,7 +415,7 @@ with col2:
                 except Exception as e:
                     err_msg = str(e)
                     if "404" in err_msg or "NOT_FOUND" in err_msg:
-                        st.error("⚠️ **지정된 모델을 수신할 수 없습니다.** 모델명이 최신 API 표준 규격(`gemini-2.0-flash` 또는 `gemini-1.5-pro-latest`)으로 설정되었는지 확인해 주세요.")
+                        st.error("⚠️ **지정된 모델을 찾을 수 없습니다.** 사이드바 분석 엔진에서 `gemini-2.0-flash`로 변경해 보세요.")
                     elif "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
                         retry_match = re.search(r"retry in ([\d\.]+)s", err_msg)
                         if retry_match:
